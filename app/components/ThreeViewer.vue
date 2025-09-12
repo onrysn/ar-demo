@@ -60,7 +60,7 @@ let controller = null
 const currentUSDZ = ref('')
 
 // Platform detection
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 
 // === Helpers ===
 const centerModel = (model) => {
