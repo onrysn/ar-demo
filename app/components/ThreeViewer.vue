@@ -3,15 +3,19 @@
 
     <!-- AR Toggle Button -->
     <div class="flex gap-4 mb-4">
-      <button @click="toggleAR" 
+      <button v-if="!isIOS" @click="toggleAR" 
               class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
         {{ arActive ? 'AR Kapat' : 'AR Aç' }}
       </button>
+
+      <a v-else :href="currentUSDZ" rel="ar" target="_blank"
+         class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
+        AR iOS'da Aç
+      </a>
     </div>
 
     <!-- Model Seçici Panel -->
-    <div
-      class="flex flex-wrap justify-center gap-3 mb-6 p-4 bg-white/30 dark:bg-gray-800/50 backdrop-blur-md rounded-2xl shadow-lg">
+    <div class="flex flex-wrap justify-center gap-3 mb-6 p-4 bg-white/30 dark:bg-gray-800/50 backdrop-blur-md rounded-2xl shadow-lg">
       <button v-for="m in models" :key="m" @click="loadModel(m)"
           class="px-6 py-3 font-medium rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white hover:from-purple-500 hover:to-indigo-500 transition-all shadow-md">
           {{ m }}
@@ -53,6 +57,10 @@ const currentModelName = ref('')
 const arActive = ref(false)
 let arButton = null
 let controller = null
+const currentUSDZ = ref('')
+
+// Platform detection
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
 
 // === Helpers ===
 const centerModel = (model) => {
@@ -60,14 +68,11 @@ const centerModel = (model) => {
   const box = new THREE.Box3().setFromObject(model)
   const center = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
-
-  model.position.sub(center) // merkeze al
-
+  model.position.sub(center)
   const maxDim = Math.max(size.x, size.y, size.z)
   const fov = camera.fov * (Math.PI / 180)
   const cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
   camera.position.set(0, 0, cameraZ * 1.5)
-
   controls.target.set(0, 0, 0)
   controls.update()
 }
@@ -76,7 +81,6 @@ const initScene = () => {
   scene = new THREE.Scene()
   const width = viewer.value.clientWidth
   const height = viewer.value.clientHeight
-
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setSize(width, height)
@@ -91,7 +95,7 @@ const initScene = () => {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
 
-  // AR controller (future use)
+  // AR controller
   controller = renderer.xr.getController(0)
   controller.addEventListener('select', () => {
     if (currentModel) {
@@ -122,11 +126,12 @@ const loadModel = (modelName) => {
       scene.add(currentModel)
       centerModel(currentModel)
       loading.value = false
+
+      // iOS Quick Look için .usdz dosyası yolu
+      currentUSDZ.value = `/models/${modelName}.usdz`
     },
     (xhr) => {
-      if (xhr.lengthComputable) {
-        progress.value = Math.round((xhr.loaded / xhr.total) * 100)
-      }
+      if (xhr.lengthComputable) progress.value = Math.round((xhr.loaded / xhr.total) * 100)
     },
     (error) => {
       console.error('Model yükleme hatası:', error)
@@ -153,7 +158,7 @@ const toggleAR = async () => {
   }
 }
 
-// === UI effects ===
+// UI effects
 const onGrabStart = () => viewer.value.classList.add('cursor-grabbing')
 const onGrabEnd = () => viewer.value.classList.remove('cursor-grabbing')
 
@@ -165,7 +170,7 @@ const onWindowResize = () => {
   if (currentModel) centerModel(currentModel)
 }
 
-// === Lifecycle ===
+// Lifecycle
 onMounted(async () => {
   initScene()
   try {
