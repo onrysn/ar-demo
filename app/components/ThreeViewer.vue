@@ -3,35 +3,36 @@
 
     <!-- AR Toggle Button -->
     <div class="flex gap-4 mb-4">
-      <button v-if="!isIOS" @click="toggleAR" 
-              class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
+      <button v-if="!isIOS" @click="toggleAR"
+        class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
         {{ arActive ? 'AR Kapat' : 'AR Aç' }}
       </button>
 
       <a v-else :href="currentUSDZ" rel="ar" target="_blank"
-         class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
+        class="px-4 py-2 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 transition">
         AR iOS'da Aç
       </a>
     </div>
 
     <!-- Model Seçici Panel -->
-    <div class="flex flex-wrap justify-center gap-3 mb-6 p-4 bg-white/30 dark:bg-gray-800/50 backdrop-blur-md rounded-2xl shadow-lg">
+    <div
+      class="flex flex-wrap justify-center gap-3 mb-6 p-4 bg-white/30 dark:bg-gray-800/50 backdrop-blur-md rounded-2xl shadow-lg">
       <button v-for="m in models" :key="m" @click="loadModel(m)"
-          class="px-6 py-3 font-medium rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white hover:from-purple-500 hover:to-indigo-500 transition-all shadow-md">
-          {{ m }}
+        class="px-6 py-3 font-medium rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white hover:from-purple-500 hover:to-indigo-500 transition-all shadow-md">
+        {{ m }}
       </button>
     </div>
 
     <!-- Progress Bar -->
     <div v-if="loading" class="w-2/3 h-4 mb-6 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
       <div class="h-4 bg-gradient-to-r from-purple-400 via-pink-500 to-red-400 transition-all duration-300"
-           :style="{ width: progress + '%' }"></div>
+        :style="{ width: progress + '%' }"></div>
     </div>
 
     <!-- 3D Viewer -->
     <div ref="viewer"
-         class="w-full h-[70vh] rounded-3xl shadow-2xl border border-gray-300 dark:border-gray-600 overflow-hidden cursor-grab"
-         @mousedown="onGrabStart" @mouseup="onGrabEnd" @mouseleave="onGrabEnd">
+      class="w-full h-[70vh] rounded-3xl shadow-2xl border border-gray-300 dark:border-gray-600 overflow-hidden cursor-grab"
+      @mousedown="onGrabStart" @mouseup="onGrabEnd" @mouseleave="onGrabEnd">
     </div>
 
   </div>
@@ -128,7 +129,7 @@ const loadModel = (modelName) => {
       loading.value = false
 
       // iOS Quick Look için .usdz dosyası yolu
-      currentUSDZ.value = `/models/${modelName}.usdz`
+      currentUSDZ.value = `/models/${modelName.replace(/\.glb$/i, '.usdz')}`
     },
     (xhr) => {
       if (xhr.lengthComputable) progress.value = Math.round((xhr.loaded / xhr.total) * 100)
