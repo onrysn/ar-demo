@@ -143,18 +143,41 @@ const loadModel = (modelName) => {
 
 // === AR ===
 const toggleAR = async () => {
+  if (isIOS) {
+    // iOS Quick Look zaten <a rel="ar"> ile açılıyor
+    console.log("iOS cihaz — Quick Look kullanılacak")
+    return
+  }
+
   if (!arActive.value) {
     try {
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['hit-test', 'dom-overlay'],
+      if (!navigator.xr) {
+        alert("Bu tarayıcı WebXR desteklemiyor. Lütfen Chrome (ARCore destekli) kullanın.")
+        return
+      }
+
+      const supported = await navigator.xr.isSessionSupported("immersive-ar")
+      if (!supported) {
+        alert("Cihaz immersive-ar modunu desteklemiyor.")
+        return
+      }
+
+      // Oturum başlat
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ["hit-test"],
+        optionalFeatures: ["dom-overlay"],
         domOverlay: { root: document.body }
       })
+
+      renderer.xr.enabled = true
       renderer.xr.setSession(session)
 
-      const referenceSpace = await session.requestReferenceSpace('local')
-      const viewerSpace = await session.requestReferenceSpace('viewer')
+      // Referans alanları
+      const referenceSpace = await session.requestReferenceSpace("local")
+      const viewerSpace = await session.requestReferenceSpace("viewer")
       const hitTestSource = await session.requestHitTestSource({ space: viewerSpace })
 
+      // Render loop
       renderer.setAnimationLoop((time, frame) => {
         if (frame) {
           const hitTestResults = frame.getHitTestResults(hitTestSource)
@@ -175,16 +198,21 @@ const toggleAR = async () => {
       })
 
       arActive.value = true
+      console.log("AR başlatıldı ✅")
     } catch (err) {
       console.error("AR başlatma hatası:", err)
+      alert("AR başlatılamadı: " + err.message)
     }
   } else {
+    // AR kapat
     const session = renderer.xr.getSession()
     if (session) await session.end()
     renderer.xr.enabled = false
     arActive.value = false
+    console.log("AR kapatıldı ❌")
   }
 }
+
 
 // UI effects
 const onGrabStart = () => viewer.value.classList.add('cursor-grabbing')
