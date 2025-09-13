@@ -191,7 +191,12 @@ const toggleAR = async () => {
       })
 
       renderer.xr.setSession(session)
-      referenceSpace = await session.requestReferenceSpace('local-floor')
+      try {
+        referenceSpace = await session.requestReferenceSpace("local-floor")
+      } catch (e) {
+        console.warn("local-floor desteklenmiyor, local kullanılacak")
+        referenceSpace = await session.requestReferenceSpace("local")
+      }
       const viewerSpace = await session.requestReferenceSpace('viewer')
       hitTestSource = await session.requestHitTestSource({ space: viewerSpace })
 
