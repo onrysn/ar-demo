@@ -43,7 +43,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { ARButton } from 'three/examples/jsm/webxr/ARButton.js'
 
 const viewer = ref(null)
 let scene, camera, renderer, controls
@@ -56,12 +55,16 @@ const progress = ref(0)
 let currentModel = null
 const currentModelName = ref('')
 const arActive = ref(false)
-let arButton = null
 let controller = null
 const currentUSDZ = ref('')
+let hitTestSource = null
+let referenceSpace = null
 
 // Platform detection
-const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+const isIOS =
+  typeof navigator !== 'undefined' &&
+  /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+  !window.MSStream
 
 // === Helpers ===
 const centerModel = (model) => {
@@ -70,10 +73,12 @@ const centerModel = (model) => {
   const center = box.getCenter(new THREE.Vector3())
   const size = box.getSize(new THREE.Vector3())
   model.position.sub(center)
+
   const maxDim = Math.max(size.x, size.y, size.z)
   const fov = camera.fov * (Math.PI / 180)
   const cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2))
   camera.position.set(0, 0, cameraZ * 1.5)
+
   controls.target.set(0, 0, 0)
   controls.update()
 }
@@ -82,10 +87,14 @@ const initScene = () => {
   scene = new THREE.Scene()
   const width = viewer.value.clientWidth
   const height = viewer.value.clientHeight
+
   camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
+
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
   renderer.setSize(width, height)
-  renderer.xr.enabled = false
+  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setClearColor(0x000000, 0) // arka planı şeffaf yap
+  renderer.xr.enabled = true
   viewer.value.appendChild(renderer.domElement)
 
   // Lights
@@ -107,9 +116,23 @@ const initScene = () => {
   })
   scene.add(controller)
 
-  // Animate
-  renderer.setAnimationLoop(() => {
-    controls.update()
+  // === Tek Animation Loop ===
+  renderer.setAnimationLoop((time, frame) => {
+    if (renderer.xr.isPresenting && frame && hitTestSource) {
+      const hitTestResults = frame.getHitTestResults(hitTestSource)
+      if (hitTestResults.length > 0 && currentModel) {
+        const hit = hitTestResults[0]
+        const pose = hit.getPose(referenceSpace)
+        currentModel.position.set(
+          pose.transform.position.x,
+          pose.transform.position.y,
+          pose.transform.position.z
+        )
+      }
+    } else {
+      controls.update()
+    }
+
     renderer.render(scene, camera)
   })
 }
@@ -128,7 +151,7 @@ const loadModel = (modelName) => {
       centerModel(currentModel)
       loading.value = false
 
-      // iOS Quick Look için .usdz dosyası yolu
+      // iOS Quick Look için .usdz yolu
       currentUSDZ.value = `/models/${modelName.replace(/\.glb$/i, '.usdz')}`
     },
     (xhr) => {
@@ -144,77 +167,49 @@ const loadModel = (modelName) => {
 // === AR ===
 const toggleAR = async () => {
   if (isIOS) {
-    // iOS Quick Look zaten <a rel="ar"> ile açılıyor
-    console.log("iOS cihaz — Quick Look kullanılacak")
+    console.log('iOS cihaz — Quick Look kullanılacak')
     return
   }
 
   if (!arActive.value) {
     try {
       if (!navigator.xr) {
-        alert("Bu tarayıcı WebXR desteklemiyor. Lütfen Chrome (ARCore destekli) kullanın.")
+        alert('Tarayıcı WebXR desteklemiyor. Chrome (ARCore destekli) deneyin.')
         return
       }
 
-      const supported = await navigator.xr.isSessionSupported("immersive-ar")
+      const supported = await navigator.xr.isSessionSupported('immersive-ar')
       if (!supported) {
-        alert("Cihaz immersive-ar modunu desteklemiyor.")
+        alert('Cihaz immersive-ar modunu desteklemiyor.')
         return
       }
 
-      // Oturum başlat
-      const session = await navigator.xr.requestSession("immersive-ar", {
-        requiredFeatures: ["hit-test"],
-        optionalFeatures: ["dom-overlay"],
-        domOverlay: { root: document.body }
+      const session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test'],
+        // optionalFeatures: ['dom-overlay'],
+        // domOverlay: { root: document.body }
       })
 
-      renderer.xr.enabled = true
       renderer.xr.setSession(session)
-
-      // Referans alanları
-      const referenceSpace = await session.requestReferenceSpace("local")
-      const viewerSpace = await session.requestReferenceSpace("viewer")
-      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace })
-
-      // Render loop
-      renderer.setAnimationLoop((time, frame) => {
-        if (frame) {
-          const hitTestResults = frame.getHitTestResults(hitTestSource)
-          if (hitTestResults.length > 0) {
-            const hit = hitTestResults[0]
-            const pose = hit.getPose(referenceSpace)
-
-            if (currentModel) {
-              currentModel.position.set(
-                pose.transform.position.x,
-                pose.transform.position.y,
-                pose.transform.position.z
-              )
-            }
-          }
-        }
-        renderer.render(scene, camera)
-      })
+      referenceSpace = await session.requestReferenceSpace('local-floor')
+      const viewerSpace = await session.requestReferenceSpace('viewer')
+      hitTestSource = await session.requestHitTestSource({ space: viewerSpace })
 
       arActive.value = true
-      console.log("AR başlatıldı ✅")
+      console.log('AR başlatıldı ✅')
     } catch (err) {
-      console.error("AR başlatma hatası:", err)
-      alert("AR başlatılamadı: " + err.message)
+      console.error('AR başlatma hatası:', err)
+      alert('AR başlatılamadı: ' + err.message)
     }
   } else {
-    // AR kapat
     const session = renderer.xr.getSession()
     if (session) await session.end()
-    renderer.xr.enabled = false
     arActive.value = false
-    console.log("AR kapatıldı ❌")
+    console.log('AR kapatıldı ❌')
   }
 }
 
-
-// UI effects
+// === UI effects ===
 const onGrabStart = () => viewer.value.classList.add('cursor-grabbing')
 const onGrabEnd = () => viewer.value.classList.remove('cursor-grabbing')
 
@@ -226,7 +221,7 @@ const onWindowResize = () => {
   if (currentModel) centerModel(currentModel)
 }
 
-// Lifecycle
+// === Lifecycle ===
 onMounted(async () => {
   initScene()
   try {
