@@ -35,6 +35,33 @@
       @mousedown="onGrabStart" @mouseup="onGrabEnd" @mouseleave="onGrabEnd">
     </div>
 
+    <!-- AR için Retikül (hedefleme) -->
+    <div v-if="arActive && reticleVisible" class="reticle" :style="reticleStyle"></div>
+
+    <!-- AR Kontrolleri -->
+    <div v-if="arActive && selectedModel" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 flex gap-4 p-4 bg-black/50 rounded-2xl backdrop-blur-md">
+      <button @click="scaleModel(0.8)" class="p-3 bg-indigo-600 rounded-full text-white hover:bg-indigo-700 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+        </svg>
+      </button>
+      <button @click="scaleModel(1.2)" class="p-3 bg-indigo-600 rounded-full text-white hover:bg-indigo-700 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
+      <button @click="rotateModel" class="p-3 bg-indigo-600 rounded-full text-white hover:bg-indigo-700 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+      <button @click="removeSelectedModel" class="p-3 bg-red-600 rounded-full text-white hover:bg-red-700 transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      </button>
+    </div>
+
   </div>
 </template>
 
@@ -59,6 +86,20 @@ const arActive = ref(false)
 let arButton = null
 let controller = null
 const currentUSDZ = ref('')
+
+// AR için yeni state değişkenleri
+let reticle = null
+const reticleVisible = ref(false)
+const reticleStyle = ref({
+  left: '50%',
+  top: '50%'
+})
+let hitTestSource = null
+let hitTestSourceRequested = false
+
+// Yeni: AR'da yerleştirilmiş modeller ve seçili model
+const placedModels = ref([])
+const selectedModel = ref(null)
 
 // Platform detection
 const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
@@ -96,16 +137,14 @@ const initScene = () => {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
 
-  // AR controller
-  controller = renderer.xr.getController(0)
-  controller.addEventListener('select', () => {
-    if (currentModel) {
-      const clone = currentModel.clone()
-      clone.position.set(0, 0, -0.5)
-      scene.add(clone)
-    }
-  })
-  scene.add(controller)
+  // Retikül (hedefleme noktası) oluştur
+  reticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.05, 0.1, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  )
+  reticle.matrixAutoUpdate = false
+  reticle.visible = false
+  scene.add(reticle)
 
   // Animate
   renderer.setAnimationLoop(() => {
@@ -124,8 +163,13 @@ const loadModel = (modelName) => {
     (gltf) => {
       currentModel = gltf.scene
       currentModelName.value = modelName
-      scene.add(currentModel)
-      centerModel(currentModel)
+      
+      // AR modunda değilse sahneye ekle
+      if (!arActive.value) {
+        scene.add(currentModel)
+        centerModel(currentModel)
+      }
+      
       loading.value = false
 
       // iOS Quick Look için .usdz dosyası yolu
@@ -141,74 +185,188 @@ const loadModel = (modelName) => {
   )
 }
 
+// === AR için yeni fonksiyonlar ===
+const onSelect = () => {
+  if (currentModel && reticle.visible) {
+    const clone = currentModel.clone()
+    clone.position.setFromMatrixPosition(reticle.matrix)
+    clone.visible = true
+    clone.userData.selectable = true // Seçilebilir olarak işaretle
+    
+    // Modeli seçmek için tıklama olayı ekle
+    clone.userData.onClick = () => {
+      // Önceki seçimi temizle
+      if (selectedModel.value) {
+        selectedModel.value.material.emissive.setHex(selectedModel.value.userData.originalEmissive);
+      }
+      
+      // Yeni modeli seç
+      selectedModel.value = clone;
+      clone.userData.originalEmissive = clone.material?.emissive?.getHex() || 0x000000;
+      
+      // Seçili modeli vurgula
+      if (clone.material) {
+        clone.material.emissive.setHex(0x555555);
+      }
+    };
+    
+    scene.add(clone)
+    placedModels.value.push(clone)
+  }
+}
+
+// Model ölçeklendirme
+const scaleModel = (factor) => {
+  if (selectedModel.value) {
+    selectedModel.value.scale.multiplyScalar(factor);
+  }
+}
+
+// Model döndürme
+const rotateModel = () => {
+  if (selectedModel.value) {
+    selectedModel.value.rotation.y += Math.PI / 4;
+  }
+}
+
+// Seçili modeli kaldır
+const removeSelectedModel = () => {
+  if (selectedModel.value) {
+    scene.remove(selectedModel.value);
+    const index = placedModels.value.indexOf(selectedModel.value);
+    if (index > -1) {
+      placedModels.value.splice(index, 1);
+    }
+    selectedModel.value = null;
+  }
+}
+
+const initXR = () => {
+  // Hit-test kaynağı iste
+  const session = renderer.xr.getSession()
+  
+  session.requestReferenceSpace('viewer').then((referenceSpace) => {
+    session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+      hitTestSource = source
+    })
+  })
+  
+  session.addEventListener('end', () => {
+    hitTestSourceRequested = false
+    hitTestSource = null
+    arActive.value = false
+    selectedModel.value = null
+  })
+  
+  // Controller için select eventi ekle
+  controller = renderer.xr.getController(0)
+  controller.addEventListener('select', onSelect)
+  
+  // Model seçmek için controller'a olay ekle
+  controller.addEventListener('selectstart', () => {
+    if (arActive.value && placedModels.value.length > 0) {
+      // Controller pozisyonundan model seçmek için ışın at
+      const tempMatrix = new THREE.Matrix4();
+      tempMatrix.identity().extractRotation(controller.matrixWorld);
+      
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+      
+      const intersects = raycaster.intersectObjects(placedModels.value);
+      
+      if (intersects.length > 0) {
+        const selected = intersects[0].object;
+        if (selected.userData.onClick) {
+          selected.userData.onClick();
+        }
+      }
+    }
+  });
+  
+  scene.add(controller)
+}
+
 // === AR ===
 const toggleAR = async () => {
   if (!arActive.value) {
-    if (navigator.xr) {
-      try {
-        const session = await navigator.xr.requestSession('immersive-ar', {
-          requiredFeatures: ['hit-test', 'dom-overlay'],
-          domOverlay: { root: document.body }
-        });
-
-        renderer.xr.enabled = true;
-        await renderer.xr.setSession(session);
-
-        // Hit test kaynakları
-        let hitTestSource = null;
-        let localSpace = null;
-        let hitTestReady = false;
-
-        session.requestReferenceSpace('viewer').then((refSpace) => {
-          session.requestHitTestSource({ space: refSpace }).then((source) => {
-            hitTestSource = source;
-            hitTestReady = true;
-          });
-        });
-
-        session.requestReferenceSpace('local').then((refSpace) => {
-          localSpace = refSpace;
-        });
-
-        // AR render döngüsü
-        renderer.setAnimationLoop((timestamp, frame) => {
-          if (frame && hitTestReady && hitTestSource && localSpace) {
-            const hitTestResults = frame.getHitTestResults(hitTestSource);
-            if (hitTestResults.length > 0) {
-              const pose = hitTestResults[0].getPose(localSpace);
-              if (currentModel) {
-                currentModel.position.set(
-                  pose.transform.position.x,
-                  pose.transform.position.y,
-                  pose.transform.position.z
-                );
-                currentModel.quaternion.set(
-                  pose.transform.orientation.x,
-                  pose.transform.orientation.y,
-                  pose.transform.orientation.z,
-                  pose.transform.orientation.w
-                );
+    // AR başlat
+    arButton = ARButton.createButton(renderer, { 
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['dom-overlay']
+    })
+    document.body.appendChild(arButton)
+    renderer.xr.enabled = true
+    
+    // Mevcut modeli sahneden kaldır (AR'da görünmesini engelle)
+    if (currentModel) {
+      scene.remove(currentModel)
+    }
+    
+    // AR oturumu başladığında
+    renderer.xr.addEventListener('sessionstart', () => {
+      arActive.value = true
+      initXR()
+      
+      // AR için animasyon döngüsünü güncelle
+      renderer.setAnimationLoop((timestamp, frame) => {
+        if (frame) {
+          const referenceSpace = renderer.xr.getReferenceSpace()
+          
+          if (hitTestSource) {
+            const hitTestResults = frame.getHitTestResults(hitTestSource)
+            
+            if (hitTestResults.length) {
+              const hit = hitTestResults[0]
+              reticle.visible = true
+              reticleVisible.value = true
+              reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix)
+              
+              // Retikül pozisyonunu ekranda göstermek için
+              const pos = new THREE.Vector3()
+              reticle.getWorldPosition(pos)
+              pos.project(camera)
+              
+              reticleStyle.value = {
+                left: `${(pos.x * 0.5 + 0.5) * 100}%`,
+                top: `${(-pos.y * 0.5 + 0.5) * 100}%`
               }
+            } else {
+              reticle.visible = false
+              reticleVisible.value = false
             }
           }
-          renderer.render(scene, camera);
-        });
-
-        arActive.value = true;
-      } catch (err) {
-        console.error('AR başlatılamadı:', err);
-      }
-    } else {
-      console.warn('WebXR desteklenmiyor.');
-    }
+        }
+        
+        renderer.render(scene, camera)
+      })
+    })
   } else {
-    const session = renderer.xr.getSession();
-    if (session) await session.end();
-    renderer.xr.enabled = false;
-    arActive.value = false;
+    // AR kapat
+    const session = renderer.xr.getSession()
+    if (session) await session.end()
+    renderer.xr.enabled = false
+    if (arButton) arButton.remove()
+    arActive.value = false
+    reticleVisible.value = false
+    selectedModel.value = null
+    
+    // Yerleştirilmiş modelleri temizle
+    placedModels.value.forEach(model => scene.remove(model))
+    placedModels.value = []
+    
+    // Normal modda modeli göster
+    if (currentModel) {
+      scene.add(currentModel)
+      centerModel(currentModel)
+    }
+    
+    // Normal render döngüsüne geri dön
+    renderer.setAnimationLoop(() => {
+      controls.update()
+      renderer.render(scene, camera)
+    })
   }
-};
-
+}
 
 // UI effects
 const onGrabStart = () => viewer.value.classList.add('cursor-grabbing')
@@ -219,7 +377,7 @@ const onWindowResize = () => {
   camera.aspect = viewer.value.clientWidth / viewer.value.clientHeight
   camera.updateProjectionMatrix()
   renderer.setSize(viewer.value.clientWidth, viewer.value.clientHeight)
-  if (currentModel) centerModel(currentModel)
+  if (currentModel && !arActive.value) centerModel(currentModel)
 }
 
 // Lifecycle
@@ -238,3 +396,17 @@ onUnmounted(() => {
   window.removeEventListener('resize', onWindowResize)
 })
 </script>
+
+<style scoped>
+.reticle {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+}
+</style>
