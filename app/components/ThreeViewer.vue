@@ -144,20 +144,71 @@ const loadModel = (modelName) => {
 // === AR ===
 const toggleAR = async () => {
   if (!arActive.value) {
-    // AR başlat
-    arButton = ARButton.createButton(renderer, { optionalFeatures: ['dom-overlay'] })
-    document.body.appendChild(arButton)
-    renderer.xr.enabled = true
-    arActive.value = true
+    if (navigator.xr) {
+      try {
+        const session = await navigator.xr.requestSession('immersive-ar', {
+          requiredFeatures: ['hit-test', 'dom-overlay'],
+          domOverlay: { root: document.body }
+        });
+
+        renderer.xr.enabled = true;
+        await renderer.xr.setSession(session);
+
+        // Hit test kaynakları
+        let hitTestSource = null;
+        let localSpace = null;
+        let hitTestReady = false;
+
+        session.requestReferenceSpace('viewer').then((refSpace) => {
+          session.requestHitTestSource({ space: refSpace }).then((source) => {
+            hitTestSource = source;
+            hitTestReady = true;
+          });
+        });
+
+        session.requestReferenceSpace('local').then((refSpace) => {
+          localSpace = refSpace;
+        });
+
+        // AR render döngüsü
+        renderer.setAnimationLoop((timestamp, frame) => {
+          if (frame && hitTestReady && hitTestSource && localSpace) {
+            const hitTestResults = frame.getHitTestResults(hitTestSource);
+            if (hitTestResults.length > 0) {
+              const pose = hitTestResults[0].getPose(localSpace);
+              if (currentModel) {
+                currentModel.position.set(
+                  pose.transform.position.x,
+                  pose.transform.position.y,
+                  pose.transform.position.z
+                );
+                currentModel.quaternion.set(
+                  pose.transform.orientation.x,
+                  pose.transform.orientation.y,
+                  pose.transform.orientation.z,
+                  pose.transform.orientation.w
+                );
+              }
+            }
+          }
+          renderer.render(scene, camera);
+        });
+
+        arActive.value = true;
+      } catch (err) {
+        console.error('AR başlatılamadı:', err);
+      }
+    } else {
+      console.warn('WebXR desteklenmiyor.');
+    }
   } else {
-    // AR kapat
-    const session = renderer.xr.getSession()
-    if (session) await session.end()
-    renderer.xr.enabled = false
-    if (arButton) arButton.remove()
-    arActive.value = false
+    const session = renderer.xr.getSession();
+    if (session) await session.end();
+    renderer.xr.enabled = false;
+    arActive.value = false;
   }
-}
+};
+
 
 // UI effects
 const onGrabStart = () => viewer.value.classList.add('cursor-grabbing')
