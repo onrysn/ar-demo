@@ -144,17 +144,44 @@ const loadModel = (modelName) => {
 // === AR ===
 const toggleAR = async () => {
   if (!arActive.value) {
-    // AR başlat
-    arButton = ARButton.createButton(renderer, { optionalFeatures: ['dom-overlay'] })
-    document.body.appendChild(arButton)
-    renderer.xr.enabled = true
-    arActive.value = true
+    try {
+      const session = await navigator.xr.requestSession('immersive-ar', {
+        requiredFeatures: ['hit-test', 'dom-overlay'],
+        domOverlay: { root: document.body }
+      })
+      renderer.xr.setSession(session)
+
+      const referenceSpace = await session.requestReferenceSpace('local')
+      const viewerSpace = await session.requestReferenceSpace('viewer')
+      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace })
+
+      renderer.setAnimationLoop((time, frame) => {
+        if (frame) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource)
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0]
+            const pose = hit.getPose(referenceSpace)
+
+            if (currentModel) {
+              currentModel.position.set(
+                pose.transform.position.x,
+                pose.transform.position.y,
+                pose.transform.position.z
+              )
+            }
+          }
+        }
+        renderer.render(scene, camera)
+      })
+
+      arActive.value = true
+    } catch (err) {
+      console.error("AR başlatma hatası:", err)
+    }
   } else {
-    // AR kapat
     const session = renderer.xr.getSession()
     if (session) await session.end()
     renderer.xr.enabled = false
-    if (arButton) arButton.remove()
     arActive.value = false
   }
 }
